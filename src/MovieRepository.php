@@ -59,4 +59,16 @@ class MovieRepository
         $stmt = $this->pdo->prepare("UPDATE movies SET is_seen = :seen, personal_rating = :rating WHERE id = :id");
         $stmt->execute([':seen' => $isSeen, ':rating' => $rating, ':id' => $id]);
     }
+
+    // --- NOUVELLE FONCTION : MISE A JOUR ---
+    public function update(int $id, int $rating, bool $isSeen): void
+    {
+        $sql = "UPDATE movies SET personal_rating = :rating, is_seen = :seen WHERE id = :id";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([
+            ':rating' => $rating,
+            ':seen' => $isSeen ? 1 : 0,
+            ':id' => $id
+        ]);
+    }
 }
