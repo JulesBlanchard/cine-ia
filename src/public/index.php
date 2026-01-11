@@ -21,36 +21,23 @@ $aiService = ($apiKey && strlen($apiKey) > 5) ? new GroqService($apiKey) : new M
 $serviceStatus = ($aiService instanceof GroqService) ? "⚡ IA Connectée" : "🟠 Mode Simulation";
 
 // --- TRAITEMENT DES ACTIONS ---
-
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-
     try {
-        // 1. SUPPRIMER
         if (isset($_POST['action']) && $_POST['action'] === 'delete' && isset($_POST['id'])) {
             $movieRepo->delete((int)$_POST['id']);
             $_SESSION['flash_message'] = "🗑️ Film supprimé.";
         }
-
-        // 2. MODIFIER (UPDATE)
         elseif (isset($_POST['action']) && $_POST['action'] === 'edit_movie') {
             $id = (int)$_POST['id'];
             $rating = (int)$_POST['rating'];
-
-            // LOGIQUE METIER : Si note > 0, alors forcément Vu. Sinon, on regarde la checkbox.
             $isSeen = ($rating > 0) ? true : isset($_POST['is_seen']);
-
             $movieRepo->update($id, $rating, $isSeen);
             $_SESSION['flash_message'] = "✅ Fiche mise à jour !";
         }
-
-        // 3. AJOUT MANUEL
         elseif (isset($_POST['action']) && $_POST['action'] === 'add_manual') {
             if (!empty($_POST['title'])) {
                 $rating = (int)($_POST['rating'] ?? 0);
-
-                // LOGIQUE METIER : Si note > 0, on force "is_seen" à 1
                 $isSeen = ($rating > 0) ? 1 : (isset($_POST['is_seen']) ? 1 : 0);
-
                 $movieRepo->save([
                         'title' => trim($_POST['title']),
                         'director' => trim($_POST['director'] ?? ''),
@@ -64,8 +51,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $_SESSION['flash_message'] = "💾 Film ajouté manuellement !";
             }
         }
-
-        // 4. DEMANDE IA
         elseif (isset($_POST['mood'])) {
             $mood = trim($_POST['mood']);
             if (!empty($mood)) {
@@ -81,21 +66,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $_SESSION['flash_message'] = "✨ Film généré : " . $movieData['title'];
             }
         }
-
     } catch (Exception $e) {
         $_SESSION['flash_error'] = "Erreur : " . $e->getMessage();
     }
-
     header("Location: /public/");
     exit;
 }
 
-// --- AFFICHAGE ---
+// --- AFFICHAGE & FILTRAGE ---
 $message = $_SESSION['flash_message'] ?? null;
 $error = $_SESSION['flash_error'] ?? null;
 unset($_SESSION['flash_message'], $_SESSION['flash_error']);
 
-$movies = $movieRepo->findAll();
+// On récupère tout
+$allMovies = $movieRepo->findAll();
+
+// ON SEPARE LES FILMS EN DEUX TABLEAUX
+$moviesToWatch = array_filter($allMovies, function($m) { return $m['is_seen'] == 0; });
+$moviesSeen = array_filter($allMovies, function($m) { return $m['is_seen'] == 1; });
 ?>
 
 <!DOCTYPE html>
@@ -111,6 +99,10 @@ $movies = $movieRepo->findAll();
         .card-movie:hover { transform: translateY(-5px); box-shadow: 0 10px 20px rgba(0,0,0,0.3); }
         .badge-ai { background-color: #6f42c1; }
         .badge-manual { background-color: #198754; }
+        /* Style des onglets */
+        .nav-tabs .nav-link { color: #aaa; border: none; font-weight: bold; }
+        .nav-tabs .nav-link.active { color: #ffc107; background: transparent; border-bottom: 3px solid #ffc107; }
+        .nav-tabs .nav-link:hover { color: white; }
     </style>
 </head>
 <body class="bg-dark text-light">
@@ -148,177 +140,64 @@ $movies = $movieRepo->findAll();
     </div>
 
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h3 class="fw-bold text-white"><i class="bi bi-collection-play"></i> Ma Collection (<?= count($movies) ?>)</h3>
+        <h3 class="fw-bold text-white"><i class="bi bi-collection-play"></i> Ma Collection</h3>
         <button class="btn btn-success fw-bold" data-bs-toggle="modal" data-bs-target="#addMovieModal">
             <i class="bi bi-plus-lg"></i> Ajouter
         </button>
     </div>
 
-    <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4">
-        <?php foreach ($movies as $movie): ?>
-            <div class="col">
-                <div class="card h-100 card-movie text-white">
-                    <div class="card-body">
-                        <div class="d-flex justify-content-between align-items-start mb-2">
-                            <h5 class="card-title fw-bold text-warning mb-0 text-truncate" style="max-width: 80%;" title="<?= htmlspecialchars($movie['title']) ?>">
-                                <?= htmlspecialchars($movie['title']) ?>
-                            </h5>
-                            <?php if (($movie['source_type'] ?? 'AI') === 'AI'): ?>
-                                <span class="badge badge-ai" title="IA"><i class="bi bi-robot"></i></span>
-                            <?php else: ?>
-                                <span class="badge badge-manual" title="Manuel"><i class="bi bi-person"></i></span>
-                            <?php endif; ?>
-                        </div>
+    <ul class="nav nav-tabs mb-4" id="movieTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active fs-5" id="towatch-tab" data-bs-toggle="tab" data-bs-target="#towatch-pane" type="button" role="tab">
+                🍿 À voir <span class="badge bg-secondary ms-2"><?= count($moviesToWatch) ?></span>
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link fs-5" id="seen-tab" data-bs-toggle="tab" data-bs-target="#seen-pane" type="button" role="tab">
+                ✅ Déjà Vu <span class="badge bg-secondary ms-2"><?= count($moviesSeen) ?></span>
+            </button>
+        </li>
+    </ul>
 
-                        <h6 class="card-subtitle mb-3 text-secondary small">
-                            <?= htmlspecialchars($movie['director'] ?? 'Inconnu') ?> • <?= htmlspecialchars($movie['release_year'] ?? '') ?>
-                        </h6>
+    <div class="tab-content" id="movieTabsContent">
 
-                        <div class="mb-3 d-flex align-items-center justify-content-between bg-dark rounded p-2">
-                            <div>
-                                <?php if ($movie['is_seen']): ?>
-                                    <span class="badge bg-success bg-opacity-25 text-success border border-success"><i class="bi bi-eye-fill"></i> Vu</span>
-                                <?php else: ?>
-                                    <span class="badge bg-secondary bg-opacity-25 text-secondary border border-secondary"><i class="bi bi-bookmark"></i> À voir</span>
-                                <?php endif; ?>
-                            </div>
-                            <div class="text-warning text-nowrap">
-                                <?php
-                                $rating = (int)($movie['personal_rating'] ?? 0);
-                                for ($i = 1; $i <= 5; $i++) {
-                                    echo ($i <= $rating) ? '<i class="bi bi-star-fill"></i>' : '<i class="bi bi-star text-secondary opacity-25"></i>';
-                                }
-                                ?>
-                            </div>
-                        </div>
-
-                        <p class="card-text small text-light opacity-75 line-clamp-3">
-                            <?= htmlspecialchars($movie['summary'] ?? 'Pas de résumé.') ?>
-                        </p>
-                    </div>
-
-                    <div class="card-footer bg-transparent border-top border-secondary d-flex justify-content-between align-items-center pt-3">
-                        <div>
-                            <?php if (!empty($movie['letterboxd_url'])): ?>
-                                <a href="<?= htmlspecialchars($movie['letterboxd_url']) ?>" target="_blank" class="btn btn-sm btn-dark border-secondary text-light me-1">
-                                    <i class="bi bi-box-arrow-up-right"></i>
-                                </a>
-                            <?php endif; ?>
-
-                            <button class="btn btn-sm btn-outline-info border-0"
-                                    data-bs-toggle="modal"
-                                    data-bs-target="#editMovieModal"
-                                    data-id="<?= $movie['id'] ?>"
-                                    data-title="<?= htmlspecialchars($movie['title']) ?>"
-                                    data-rating="<?= $movie['personal_rating'] ?>"
-                                    data-seen="<?= $movie['is_seen'] ?>">
-                                <i class="bi bi-pencil-square"></i>
-                            </button>
-                        </div>
-
-                        <form method="POST" onsubmit="return confirm('Supprimer ?');">
-                            <input type="hidden" name="action" value="delete">
-                            <input type="hidden" name="id" value="<?= $movie['id'] ?>">
-                            <button type="submit" class="btn btn-sm btn-outline-danger border-0">
-                                <i class="bi bi-trash-fill"></i>
-                            </button>
-                        </form>
-                    </div>
+        <div class="tab-pane fade show active" id="towatch-pane" role="tabpanel">
+            <?php if(empty($moviesToWatch)): ?>
+                <div class="text-center text-muted py-5">
+                    <i class="bi bi-camera-reels display-1"></i>
+                    <p class="mt-3">Votre liste est vide. Ajoutez des films !</p>
                 </div>
-            </div>
-        <?php endforeach; ?>
-    </div>
-</div>
-
-<div class="modal fade" id="addMovieModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content bg-dark text-white border-secondary">
-            <div class="modal-header border-secondary">
-                <h5 class="modal-title">Ajouter un film</h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-            </div>
-            <form method="POST">
-                <div class="modal-body">
-                    <input type="hidden" name="action" value="add_manual">
-                    <div class="mb-3">
-                        <label>Titre *</label>
-                        <input type="text" name="title" class="form-control bg-secondary text-white border-0" required>
-                    </div>
-                    <div class="row g-2 mb-3">
-                        <div class="col-6"><label>Réalisateur</label><input type="text" name="director" class="form-control bg-secondary text-white border-0"></div>
-                        <div class="col-6"><label>Année</label><input type="number" name="year" class="form-control bg-secondary text-white border-0"></div>
-                    </div>
-                    <div class="mb-3"><label>Résumé</label><textarea name="summary" class="form-control bg-secondary text-white border-0"></textarea></div>
-
-                    <div class="row align-items-center">
-                        <div class="col-auto">
-                            <div class="form-check form-switch">
-                                <input class="form-check-input" type="checkbox" name="is_seen" id="addIsSeen">
-                                <label class="form-check-label" for="addIsSeen">Vu</label>
-                            </div>
-                        </div>
-                        <div class="col">
-                            <select name="rating" id="addRating" class="form-select bg-secondary text-white border-0">
-                                <option value="0">Pas de note</option>
-                                <option value="5">⭐⭐⭐⭐⭐ Chef d'œuvre</option>
-                                <option value="4">⭐⭐⭐⭐ Très bon</option>
-                                <option value="3">⭐⭐⭐ Pas mal</option>
-                                <option value="2">⭐⭐ Bof</option>
-                                <option value="1">⭐ Navet</option>
-                            </select>
-                        </div>
-                    </div>
+            <?php else: ?>
+                <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4">
+                    <?php foreach ($moviesToWatch as $movie): ?>
+                        <?php include 'movie_card_template.php'; ?>
+                    <?php endforeach; ?>
                 </div>
-                <div class="modal-footer border-secondary">
-                    <button type="submit" class="btn btn-success">Enregistrer</button>
+            <?php endif; ?>
+        </div>
+
+        <div class="tab-pane fade" id="seen-pane" role="tabpanel">
+            <?php if(empty($moviesSeen)): ?>
+                <div class="text-center text-muted py-5">
+                    <i class="bi bi-eye-slash display-1"></i>
+                    <p class="mt-3">Vous n'avez pas encore vu de films.</p>
                 </div>
-            </form>
+            <?php else: ?>
+                <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4">
+                    <?php foreach ($moviesSeen as $movie): ?>
+                        <?php include 'movie_card_template.php'; ?>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
         </div>
     </div>
 </div>
 
-<div class="modal fade" id="editMovieModal" tabindex="-1">
-    <div class="modal-dialog modal-sm">
-        <div class="modal-content bg-dark text-white border-secondary">
-            <div class="modal-header border-secondary">
-                <h5 class="modal-title"><i class="bi bi-pencil"></i> Modifier</h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-            </div>
-            <form method="POST">
-                <div class="modal-body">
-                    <input type="hidden" name="action" value="edit_movie">
-                    <input type="hidden" name="id" id="editId">
-
-                    <p class="text-warning fw-bold text-center" id="editTitleDisplay">Titre</p>
-
-                    <div class="mb-3">
-                        <label class="form-label text-muted small">Votre note</label>
-                        <select name="rating" id="editRating" class="form-select bg-secondary text-white border-0">
-                            <option value="0">Pas de note</option>
-                            <option value="5">⭐⭐⭐⭐⭐ (5)</option>
-                            <option value="4">⭐⭐⭐⭐ (4)</option>
-                            <option value="3">⭐⭐⭐ (3)</option>
-                            <option value="2">⭐⭐ (2)</option>
-                            <option value="1">⭐ (1)</option>
-                        </select>
-                    </div>
-
-                    <div class="form-check form-switch mb-3">
-                        <input class="form-check-input" type="checkbox" name="is_seen" id="editIsSeen">
-                        <label class="form-check-label" for="editIsSeen">Vu</label>
-                    </div>
-                </div>
-                <div class="modal-footer border-secondary">
-                    <button type="submit" class="btn btn-primary w-100">Mettre à jour</button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
+<?php include 'modals.php'; ?>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-    // 1. Remplissage Modale EDIT
+    // JS MODALE
     const editModal = document.getElementById('editMovieModal')
     if (editModal) {
         editModal.addEventListener('show.bs.modal', event => {
@@ -329,21 +208,16 @@ $movies = $movieRepo->findAll();
             editModal.querySelector('#editIsSeen').checked = (button.getAttribute('data-seen') == 1)
         })
     }
-
-    // 2. AUTO-CHECK "VU" SI NOTE > 0
+    // JS AUTO CHECK
     function autoCheckSeen(ratingId, checkboxId) {
         const ratingSelect = document.getElementById(ratingId);
         const checkbox = document.getElementById(checkboxId);
         if(ratingSelect && checkbox) {
             ratingSelect.addEventListener('change', function() {
-                if (this.value > 0) {
-                    checkbox.checked = true;
-                }
+                if (this.value > 0) checkbox.checked = true;
             });
         }
     }
-
-    // On active cette logique pour les deux formulaires
     autoCheckSeen('addRating', 'addIsSeen');
     autoCheckSeen('editRating', 'editIsSeen');
 </script>
