@@ -45,7 +45,7 @@ jobs:
       # On vérifie juste que le fichier docker-compose.yml est valide et bien indenté.
       # Ça évite de casser la prod avec une erreur YAML.
       - name: 🐳 Validate Docker Compose config
-        run: docker-compose config
+        run: docker compose config
 
   # ---------------------------------------------------------------------------
   # JOB 2 : AUDIT DE SÉCURITÉ (La touche "DevOps")
