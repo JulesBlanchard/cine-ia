@@ -36,14 +36,17 @@ jobs:
           extensions: mbstring, intl, pdo, pdo_mysql # Les extensions requises par notre app
 
       # Étape 3 : Chasse aux erreurs de syntaxe (Linting)
-      # Cette commande parcourt tous les fichiers .php du dossier src/
-      # Si on a oublié un point-virgule quelque part, ça pète ici.
       - name: 🔎 PHP Syntax Check (Lint)
         run: find src -name "*.php" -print0 | xargs -0 -n1 php -l
 
+      # --- AJOUT ICI ---
+      # Docker a besoin du fichier .env pour démarrer, même s'il est vide.
+      # Comme on ne l'a pas mis sur GitHub (sécurité), on en crée un faux ici.
+      - name: 🔒 Create dummy .env file
+        run: touch .env
+      # -----------------
+
       # Étape 4 : Validation de la config Docker
-      # On vérifie juste que le fichier docker-compose.yml est valide et bien indenté.
-      # Ça évite de casser la prod avec une erreur YAML.
       - name: 🐳 Validate Docker Compose config
         run: docker compose config
 
