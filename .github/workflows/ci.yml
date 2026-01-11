@@ -1,0 +1,74 @@
+name: CI/CD Pipeline - ReLiS
+
+# -----------------------------------------------------------------------------
+# DÉCLENCHEURS (TRIGGERS)
+# Ici, on définit quand le robot doit se réveiller.
+# On veut tester le code à chaque fois qu'on pousse sur 'main' ou qu'on ouvre une PR.
+# -----------------------------------------------------------------------------
+on:
+  push:
+    branches: [ "main", "feature/*" ] # On surveille aussi les features en cours
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # JOB 1 : QUALITÉ & SANTÉ DU CODE
+  # L'objectif est de détecter les erreurs bêtes (syntaxe, config) avant qu'elles n'arrivent en prod.
+  # ---------------------------------------------------------------------------
+  code-quality:
+    name: 🔍 Quality Check
+    runs-on: ubuntu-latest # On utilise une machine virtuelle Linux standard
+
+    steps:
+      # Étape 1 : Récupération du code
+      # Sans ça, le robot travaille sur un dossier vide.
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      # Étape 2 : Préparation de l'environnement PHP
+      # On installe la même version que celle utilisée dans notre Dockerfile (8.2)
+      # pour éviter les surprises du type "ça marche chez moi mais pas ici".
+      - name: 🛠️ Setup PHP environment
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, intl, pdo, pdo_mysql # Les extensions requises par notre app
+
+      # Étape 3 : Chasse aux erreurs de syntaxe (Linting)
+      # Cette commande parcourt tous les fichiers .php du dossier src/
+      # Si on a oublié un point-virgule quelque part, ça pète ici.
+      - name: 🔎 PHP Syntax Check (Lint)
+        run: find src -name "*.php" -print0 | xargs -0 -n1 php -l
+
+      # Étape 4 : Validation de la config Docker
+      # On vérifie juste que le fichier docker-compose.yml est valide et bien indenté.
+      # Ça évite de casser la prod avec une erreur YAML.
+      - name: 🐳 Validate Docker Compose config
+        run: docker-compose config
+
+  # ---------------------------------------------------------------------------
+  # JOB 2 : AUDIT DE SÉCURITÉ (La touche "DevOps")
+  # On scanne le projet pour trouver des failles connues (CVE).
+  # Ce job ne se lance que si le job précédent (code-quality) a réussi.
+  # ---------------------------------------------------------------------------
+  security-audit:
+    name: 🛡️ Security Scan
+    needs: code-quality
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      # On utilise Trivy, c'est le standard actuel pour scanner les failles.
+      # C'est un point fort à mentionner en entretien.
+      - name: 🚨 Run Trivy Vulnerability Scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs' # On scanne le File System (les fichiers)
+          scan-ref: '.'
+          format: 'table' # Affiche un joli tableau dans les logs
+          # On met exit-code à 0 pour ne pas bloquer le pipeline même si une faille est trouvée
+          # (En prod, on mettrait 1 pour bloquer le déploiement)
+          exit-code: '0'
+          severity: 'CRITICAL,HIGH' # On ne veut voir que les vrais problèmes
